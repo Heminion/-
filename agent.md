@@ -745,3 +745,417 @@ python app.py
 4. 已确认 Python 项目源码可通过语法级编译检查。
 5. 已确认 Java 项目当前机器缺少 `mvn`，暂未完成编译级验证。
 6. 已将上述事实沉淀到本文件，供后续所有对话复用。
+
+## 九、2026-04-03 新增代码仓补充
+
+这次初始化后，工作区认知需要扩展为“多子仓库混合工作区”，不再只是 Java 项目 + Python Agent + 面试资料。
+
+### 1. 当前工作区状态增量
+
+从仓库根目录 `git status --short --branch` 可确认：
+
+- 当前分支仍是 `develop-1`。
+- 根仓库里已有未提交修改：
+  - `.DS_Store`
+  - `面试总结/2026-3-13美团后端1面复盘.md`
+- 以下目录当前作为未跟踪内容存在于根仓库：
+  - `crm_api/`
+  - `expr/`
+  - `house-spider-googlesheets/`
+  - `hunt2018/`
+  - `service_api/`
+
+这些目录里很多本身还各自带有独立 `.git`，后续默认把它们视为“导入到当前工作区的独立子仓库/独立代码库”，不要默认按单仓库统一改动。
+
+### 2. Go 项目认知：`house-spider-googlesheets`
+
+#### 2.1 项目定位
+
+这是一个基于 Go 的 Google Sheets / Excel 数据同步与标准化处理工具，面向租赁房产/楼盘数据采集与下游投递。它是当前仓库里文档最完整的新增代码项目之一。
+
+根据 `README.md` 与 `docs/README.md`，它的目标包括：
+
+- 批量处理多个供应商数据源
+- 通过配置驱动解析不同表格格式
+- 标准化为统一 `Property / Unit` 结构
+- 输出到 CSV / JSON / MQ
+- 支持 AI 解析、映射解析和自定义解析
+
+#### 2.2 技术栈与依赖
+
+从 `go.mod` 可确认：
+
+- Go 版本：`1.25`
+- CLI：`cobra`
+- 配置：`viper`
+- 依赖注入：`google/wire`
+- 日志：`zap`
+- Excel 处理：`excelize`
+- AI：`openai-go`
+- 表达式引擎：`expr`
+- MQ：`rabbitmq/amqp091-go`、`rocketmq-client-go`、`aliyunmq`
+
+#### 2.3 实际入口与运行方式
+
+代码入口是：
+
+- `house-spider-googlesheets/cmd/spider/main.go`
+
+已确认当前代码入口使用的是：
+
+- 命令名：`spider`
+- 必填参数：`--spider` / `-s`
+- 可选参数：`--dry-run` / `-d`
+- 默认主配置文件：`configs/config.yaml`
+- Spider 配置路径：`configs/spiders/{spiderName}.yaml`
+
+也就是说，当前更可信的运行入口应理解为类似：
+
+```bash
+go run ./cmd/spider --spider <name> [--dry-run]
+```
+
+而不是单纯照 README 里的旧 `sync` 示例运行。
+
+#### 2.4 文档与代码的一个重要偏差
+
+要特别记住：
+
+- `README.md` 里仍大量使用“`sync` 命令 + `configs/suppliers/*.yaml`”的口径
+- 但当前 `cmd/spider/main.go` 已经是“`spider` 命令 + `configs/spiders/*.yaml`”的实现
+
+这说明该项目经历过架构或命名重构，存在明显文档/代码漂移。后续如果遇到“按文档操作却跑不通”，优先以当前代码入口和 `cmd/spider/main.go` 为准。
+
+#### 2.5 架构认知
+
+从 README 和代码可确认它是明显的 Pipeline 架构：
+
+- `cmd/spider`
+  命令行入口
+- `internal/wire`
+  应用初始化和依赖注入
+- `internal/pipeline`
+  Pipeline Manager 与 Stage 流程
+- `pkg/`
+  配置、日志、HTTP、AI、CSV、MQ 等公共能力
+
+`main.go` 的执行流程已确认是：
+
+1. 用 `wire.InitializeApp(configPath)` 初始化应用
+2. 生成 `pipeline_id`
+3. 加载 spider 配置
+4. 创建 `pipeline.Manager`
+5. 执行 Pipeline
+6. 打印 stage 统计信息
+
+#### 2.6 配置认知
+
+`configs/config.yaml` 里已确认：
+
+- `openai.api_key` 走环境变量 `OPENAI_API_KEY`
+- 下载模块支持 `timeout`、`retry_count`、`retry_delay`
+- `proxy_url` 仅对 Google Sheets URL 生效
+- 输出目录默认在 `runtime/output` 与 `runtime/excel`
+- MQ 配置示例同时给了 RabbitMQ 和 RocketMQ
+
+这说明它本质是“表格下载 + 数据标准化 + 可选消息投递”的离线/批处理系统。
+
+#### 2.7 后续协作默认认知
+
+如果后续用户提到这个项目，优先从以下文件建立上下文：
+
+- `README.md`
+- `docs/README.md`
+- `cmd/spider/main.go`
+- `configs/config.yaml`
+
+并默认把“文档是否与当前代码一致”当作排障高优先级问题。
+
+### 3. Go 库认知：`expr`
+
+#### 3.1 项目定位
+
+`expr/` 不是业务系统，而是一个独立的 Go 表达式语言库，模块名是：
+
+- `github.com/expr-lang/expr`
+
+它更像一个上游开源库镜像/源码副本，而不是当前工作区自研业务项目。
+
+#### 3.2 核心能力
+
+从 `README.md` 和 `docs/getting-started.md` 可确认：
+
+- 面向 Go 的表达式语言
+- 强调安全、无副作用、可终止
+- 编译期做类型检查
+- 表达式先 `Compile` 成字节码程序，再 `Run`
+- 编译后的程序可复用，且可并发安全运行
+
+一句话理解：
+
+“它是一个为 Go 项目提供动态规则、动态配置和规则引擎能力的表达式执行库。”
+
+#### 3.3 代码结构认知
+
+根目录下这些目录非常关键：
+
+- `parser`
+- `checker`
+- `compiler`
+- `optimizer`
+- `vm`
+- `builtin`
+- `repl`
+- `docs`
+
+这说明它是完整的“解析 -> 类型检查 -> 编译 -> 虚拟机执行”实现，不只是一个薄包装工具。
+
+#### 3.4 后续协作默认认知
+
+如果后续用户提到 `expr`，默认按“语言实现/库源码”来分析，而不是按业务 CRUD 项目思路处理。
+
+### 4. PHP 控制台项目认知：`hunt2018`
+
+#### 4.1 项目定位
+
+`hunt2018` 是一个 ThinkPHP 体系下的 Console/命令行系统，README 标题是：
+
+- `hunt2018 新系统Console服务`
+
+它更偏：
+
+- 批处理任务
+- 定时任务
+- 爬虫/同步任务
+- 数据修复
+- 外部平台集成
+
+#### 4.2 技术栈与依赖
+
+从 `composer.json` 可确认：
+
+- PHP 版本要求：`>=7.4`
+- 框架：`chinayin/thinkphp5`
+- 命令体系：`chinayin/think-command`
+- 还集成了：
+  - Google API
+  - OSS
+  - Elasticsearch DSL
+  - Spreadsheet
+  - Sentry
+  - PDF 处理
+  - LeanCloud
+
+README 里写的是 `php 7.2+`，但这里应以 `composer.json` 的 `>=7.4` 作为更可信事实。
+
+#### 4.3 目录与业务认知
+
+README 已列出 `apps/hunt/command` 下的大量命令目录，包括：
+
+- `activity`
+- `customer`
+- `house`
+- `message`
+- `payment`
+- `spider`
+- `statistics`
+- `sync`
+- `task`
+
+这说明它是一个大型命令集合项目，不是单一接口应用。
+
+#### 4.4 文档线索
+
+根目录下有多份非常业务化的文档，例如：
+
+- `createHouse接口参数.md`
+- `createUnit接口参数.md`
+- `SpiderGooglePlace代码解析.md`
+- `ImportHouseData代码解析.md`
+
+结合这些文档，可以把 `hunt2018` 理解为“房源导入、POI/地图、同步与中台接口联动”的历史控制台系统。
+
+例如 `createHouse接口参数.md` 已明确记录：
+
+- 存在 `/service/houseSpider/createHouse` 接口
+- 用于创建或更新房源 houseId
+- 参数结构覆盖 `uhouzz`、图片、文本、设施、标签、扩展信息等
+
+所以它和房源数据同步、房源中台关系很深。
+
+#### 4.5 运维认知
+
+README 还写明线上定时任务依赖：
+
+- `crontab`
+- `pm2`
+
+因此后续若排查这个项目，不应只盯 PHP Web 入口，还要考虑命令行任务、定时调度和运行目录。
+
+### 5. PHP 后端项目认知：`crm_api`
+
+#### 5.1 项目定位
+
+`crm_api` 是一个 ThinkPHP 5 风格的 CRM 后端项目，README 标题是：
+
+- `uhomes_crm_api`
+
+它的 README 很简短，但结合目录和 `composer.json`，可以确认这是一个业务域很多、模型和服务极重的老牌单体/准单体项目。
+
+#### 5.2 技术栈与依赖
+
+从 `composer.json` 可确认：
+
+- PHP：`>=7.4`
+- 框架：`chinayin/thinkphp5` `^5.0.60`
+- OAuth2：`league/oauth2-server`
+- LeanCloud
+- 阿里云 MNS
+- Spreadsheet / CSV
+- PHPMailer
+- Sentry
+- PDF 相关库
+
+脚本中还定义了：
+
+- `composer test`
+- `composer php-cs-fixer`
+- `composer phpstan`
+- `gen-apidoc`
+
+这说明它具备：
+
+- 测试
+- 静态分析
+- 代码格式化
+- API 文档生成
+
+#### 5.3 结构认知
+
+当前最关键的目录是：
+
+- `apps/common/`
+- `configs/`
+- `tests/`
+- `thinkphp/`
+
+`apps/common/` 下可以看到大量：
+
+- `helper`
+- `service`
+- `model`
+- `behavior`
+- `traits`
+- `dto`
+- `transformer`
+
+这说明公共层非常厚，业务逻辑和领域模型都堆在一起，属于典型成熟业务后端。
+
+#### 5.4 配置与业务域信号
+
+`configs/extra/` 下已出现大量业务配置文件，例如：
+
+- `crm.php`
+- `order.php`
+- `partner.php`
+- `pay.php`
+- `intent.php`
+- `aigc.php`
+- `leancloud.php`
+- `mailer.php`
+
+因此后续如果用户说“CRM 项目”或“异乡好居实习项目”，要优先考虑这里可能就是主要上下文来源之一。
+
+#### 5.5 子模块认知
+
+README 明确要求：
+
+- `git submodule init`
+- `git submodule update`
+- `git submodule foreach git pull`
+
+并指出：
+
+- `apps/common` 是公共包
+
+后续若遇到代码缺失、类找不到、公共层不完整等问题，要先检查子模块是否齐全，而不是直接怀疑业务代码。
+
+### 6. PHP 后端项目认知：`service_api`
+
+#### 6.1 项目定位
+
+`service_api` 的 README 几乎没有有效说明，只写了：
+
+- `uhomes_service_api`
+
+因此这里后续分析要以：
+
+- `composer.json`
+- `configs/`
+- `apps/common/`
+
+作为主要事实来源。
+
+#### 6.2 技术栈与依赖
+
+从 `composer.json` 可确认：
+
+- PHP：`>=7.4`
+- 框架：`chinayin/thinkphp5`
+- 第三方集成非常多，包括：
+  - 阿里云多套服务
+  - MNS
+  - Elasticsearch
+  - Google API
+  - Microsoft Graph
+  - OpenAI
+  - Tencent IM / VOD
+  - Trustpilot
+  - OCR / Geo / OSS / 支付 / 推送等
+
+这说明 `service_api` 明显比 `crm_api` 更偏“平台服务汇聚层/集成层”。
+
+#### 6.3 结构认知
+
+目录结构与 `crm_api` 高度相似：
+
+- `apps/common`
+- `configs`
+- `tests`
+- `thinkphp`
+- `vendor`
+
+并且 `apps/common/service/` 下已经有非常短的领域 README：
+
+- `account/README.md`：`客户领域`
+- `intent/README.md`：`商机领域`
+
+虽然文档极少，但至少说明该项目内部开始尝试按业务领域划分服务层。
+
+#### 6.4 后续协作默认认知
+
+如果后续用户要求在 `service_api` 排查问题，默认要先确认：
+
+- Composer 依赖是否完整
+- 配置文件是否齐全
+- 目标功能属于哪个业务域
+- 是否其实应该去 `crm_api` 或 `hunt2018` 排查，而不是在 `service_api` 找
+
+因为这几个 PHP 项目看起来存在较强的历史耦合与职责交叉。
+
+### 7. 多项目协作默认约定补充
+
+在原有默认约定之外，再追加以下约定：
+
+1. 用户如果提到“项目”或“代码”，现在至少要在以下对象里判定上下文：
+   - `heima/hm-dianping`
+   - `AI大模型RAG与智能体开发_Agent项目`
+   - `house-spider-googlesheets`
+   - `expr`
+   - `hunt2018`
+   - `crm_api`
+   - `service_api`
+2. 对新增的 `crm_api`、`expr`、`house-spider-googlesheets`、`hunt2018`、`service_api`，默认先视为独立子仓库，不做跨项目批量改动。
+3. 若用户没有明确指定子项目，而问题又明显依赖业务上下文，应先从文件路径或业务术语判断，不要直接假设指的是 `hm-dianping`。
+4. 对 `house-spider-googlesheets`，优先信任当前代码入口和 `docs/README.md`，谨慎信任 README 中可能过期的命令示例。
+5. 对 `crm_api` / `service_api` / `hunt2018` 这类 PHP 老项目，优先把 `composer.json` 和 `configs/` 视为真实运行依据，README 往往只够做索引，不能单独作为真相源。

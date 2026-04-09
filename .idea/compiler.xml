@@ -6,7 +6,6 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
-        <module name="hm-dianping" />
       </profile>
     </annotationProcessing>
   </component>
@@ -16,6 +15,3 @@
     </option>
   </component>
 </project>
-
-
-
